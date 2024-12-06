@@ -25,15 +25,12 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import com.example.matrixscanviews.databinding.ActivityMainBinding
 import com.google.gson.Gson
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -53,8 +50,6 @@ class MainActivity : AppCompatActivity() {
 
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
-
-    private var keepScanning = false
 
 
     private lateinit var cameraExecutor: ExecutorService
@@ -91,7 +86,7 @@ class MainActivity : AppCompatActivity() {
             Barcode.FORMAT_EAN_13,
             Barcode.FORMAT_AZTEC
         )
-        // .enableAllPotentialBarcodes()
+        //.enableAllPotentialBarcodes()
         .build()
 
     val scanner = BarcodeScanning.getClient(options)
@@ -118,20 +113,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+
     }
 
     private fun takePhoto() {
 
 
-        lifecycleScope.launch {
-            keepScanning = true
-            Toast.makeText(baseContext, "Escaneando...", Toast.LENGTH_SHORT).show()
-            delay(500)
-            keepScanning = false
-
-
-        }
-/*
         // Get a stable reference of the modifiable image capture use case
         val imageCapture = imageCapture ?: return
 
@@ -171,16 +159,12 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(baseContext, "Escaneando...", Toast.LENGTH_SHORT).show()
                     Log.d(TAG, msg)
 
-                    *//*
-                                        val imageBitmap =
-                                            BitmapUtils.getBitmapFromContentUri(contentResolver, output.savedUri)
-                                                ?: return*//*
-
                     output.savedUri?.let { proccessImage(it) }
                 }
             }
-        )*/
+        )
     }
+
 
     private fun captureVideo() {}
 
@@ -220,10 +204,15 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider.unbindAll()
 
                 // Bind use cases to camera
-                cameraProvider.bindToLifecycle(
+                val camera = cameraProvider.bindToLifecycle(
                     this, cameraSelector, preview, imageCapture, imageAnalyzer
                 )
 
+
+                val cameraControl = camera.cameraControl
+                val exposureState = camera.cameraInfo.exposureState
+
+                //cameraControl.setExposureCompensationIndex(exposureState.exposureCompensationRange.lower)
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
@@ -365,67 +354,57 @@ class MainActivity : AppCompatActivity() {
         @OptIn(ExperimentalGetImage::class)
         override fun analyze(imageProxy: ImageProxy) {
             Log.d(TAG, "BarcodeAnalizer")
-
-            if (keepScanning) {
-
-                val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    Log.d(TAG, "Media image != null")
-                    val image =
-                        InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                    // Pass image to an ML Kit Vision API
-                    // ...
-
-                    val scanner = BarcodeScanning.getClient(options)
-
-                    val result = scanner.process(image)
-                        .addOnSuccessListener { barcodes ->
-                            // Task completed successfully
+            /*            val mediaImage = imageProxy.image
+                        if (mediaImage != null) {
+                            Log.d(TAG, "Media image != null")
+                            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                            // Pass image to an ML Kit Vision API
                             // ...
-                            for (barcode in barcodes) {
-                                val bounds = barcode.boundingBox
-                                val corners = barcode.cornerPoints
 
-                                val rawValue = barcode.rawValue
-                                val formatType = barcode.format
-                                // See API reference for complete list of supported types
-                                val type = when (formatType) {
-                                    Barcode.FORMAT_CODE_128 -> {
-                                        "CODE 128"
+                            val scanner = BarcodeScanning.getClient(options)
+
+                            val result = scanner.process(image)
+                                .addOnSuccessListener { barcodes ->
+                                    // Task completed successfully
+                                    // ...
+                                    for (barcode in barcodes) {
+                                        val bounds = barcode.boundingBox
+                                        val corners = barcode.cornerPoints
+
+                                        val rawValue = barcode.rawValue
+                                        val formatType = barcode.format
+                                        // See API reference for complete list of supported types
+                                        val type = when (formatType) {
+                                            Barcode.FORMAT_CODE_128 -> {
+                                                "CODE 128"
+                                            }
+
+                                            Barcode.FORMAT_EAN_13 -> {
+                                                "EAN 13"
+                                            }
+
+                                            else -> {
+                                                "QR"
+                                            }
+                                        }
+
+                                        if (rawValue != null) {
+                                            val barcodeToBeAdded = Barcode(type, rawValue)
+                                            if (!barcodeList.contains(barcodeToBeAdded))
+                                                barcodeList.add(barcodeToBeAdded)
+                                            Log.d(TAG, "Barcode: $rawValue")
+                                        }
+                                        Log.d(TAG, "Barcode: " + rawValue.toString())
                                     }
-
-                                    Barcode.FORMAT_EAN_13 -> {
-                                        "EAN 13"
-
-                                    }
-
-                                    else -> {
-                                        "QR"
-                                    }
+                                    imageProxy.close()
                                 }
-
-                                if (rawValue != null) {
-                                    val barcodeToBeAdded = Barcode(type, rawValue)
-                                    if (!barcodeList.contains(barcodeToBeAdded))
-                                        barcodeList.add(barcodeToBeAdded)
-                                    Log.d(TAG, "Barcode: $rawValue")
+                                .addOnFailureListener {
+                                    // Task failed with an exception
+                                    // ...
+                                    Log.d(TAG, "No barcodes found")
+                                    imageProxy.close()
                                 }
-                                Log.d(TAG, "Barcode: " + rawValue.toString())
-                            }
-                            imageProxy.close()
-                        }
-                        .addOnFailureListener {
-                            // Task failed with an exception
-                            // ...
-                            Log.d(TAG, "No barcodes found")
-                            imageProxy.close()
-                        }
-                }
-
-            } else {
-                imageProxy.close()
-            }
-
+                        }*/
 
 
         }
