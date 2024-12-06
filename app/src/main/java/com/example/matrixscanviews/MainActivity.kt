@@ -26,6 +26,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.core.content.ContextCompat
 import com.example.matrixscanviews.databinding.ActivityMainBinding
+import com.example.matrixscanviews.ui.BarcodeGraphic
 import com.google.gson.Gson
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -86,15 +87,19 @@ class MainActivity : AppCompatActivity() {
             Barcode.FORMAT_EAN_13,
             Barcode.FORMAT_AZTEC
         )
-        //.enableAllPotentialBarcodes()
+        .enableAllPotentialBarcodes()
         .build()
 
     val scanner = BarcodeScanning.getClient(options)
+
+    private var graphicOverlay: GraphicOverlay? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewBinding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(viewBinding.root)
+
+        graphicOverlay = findViewById(R.id.graphic_overlay)
 
         // Request camera permissions
         if (allPermissionsGranted()) {
@@ -287,7 +292,7 @@ class MainActivity : AppCompatActivity() {
         //val image = InputImage.fromBitmap(bitmap, 0)
 
         if (image != null) {
-
+            graphicOverlay?.clear()
             Log.d(TAG, "Image != null")
 
 
@@ -297,6 +302,7 @@ class MainActivity : AppCompatActivity() {
                     // ...
 
                     if (barcodes.isNotEmpty()) {
+
                         Toast.makeText(
                             this,
                             "${barcodes.size} códigos de barras leídos",
@@ -333,6 +339,15 @@ class MainActivity : AppCompatActivity() {
                                 barcodeList.add(barcodeToBeAdded)
                             Log.d(TAG, "Barcode: $rawValue")
                         }
+
+                        graphicOverlay!!.setImageSourceInfo(
+                            image.width,
+                            image.height,
+                            /* isFlipped= */ false
+                        )
+
+                        graphicOverlay?.add(BarcodeGraphic(graphicOverlay, barcode))
+                        graphicOverlay?.invalidate()
 
                     }
 
