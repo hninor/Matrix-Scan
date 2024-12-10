@@ -21,4 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "MatrixScanViews"
 include(":app")
- 
+include(":sdk")

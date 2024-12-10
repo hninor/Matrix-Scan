@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -32,6 +33,16 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import org.opencv.android.OpenCVLoader
+import org.opencv.android.Utils
+import org.opencv.core.Core
+import org.opencv.core.CvType
+import org.opencv.core.Mat
+import org.opencv.core.MatOfPoint
+import org.opencv.core.MatOfPoint2f
+import org.opencv.core.Scalar
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -120,6 +131,171 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
 
 
+        if (OpenCVLoader.initLocal()) {
+            Log.i("OpenCV", "OpenCV successfully loaded.");
+        }
+
+
+    }
+
+    fun convertToGrayscale(bitmap: Bitmap): Bitmap {
+        // Convert Bitmap to OpenCV Mat
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        // Create a new Mat for grayscale image
+        val grayMat = Mat(mat.rows(), mat.cols(), CvType.CV_8UC1)
+
+        // Convert the image to grayscale
+        Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
+
+        // Convert the grayscale Mat back to Bitmap
+        val grayBitmap =
+            Bitmap.createBitmap(grayMat.cols(), grayMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(grayMat, grayBitmap)
+
+        return grayBitmap
+    }
+
+    fun applyGaussianBlur(bitmap: Bitmap): Bitmap {
+        // Convert Bitmap to Mat
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        // Create a new Mat for the grayscale image
+        val grayMat = Mat(mat.rows(), mat.cols(), CvType.CV_8UC1)
+
+        // Convert the original image to grayscale
+        Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
+
+        // Create another Mat to store the blurred image
+        val blurredMat = Mat()
+
+        // Apply Gaussian Blur (Kernel size 15x15, and sigmaX = 0)
+        Imgproc.GaussianBlur(grayMat, blurredMat, Size(3.0, 3.0), 1.5)
+
+        // Convert the blurred Mat back to Bitmap
+        val blurredBitmap = Bitmap.createBitmap(blurredMat.cols(), blurredMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(blurredMat, blurredBitmap)
+
+        return blurredBitmap
+    }
+
+    fun applyCannyEdgeDetection(bitmap: Bitmap): Bitmap {
+        // Convert Bitmap to Mat
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        // Convert to Grayscale
+        val grayMat = Mat(mat.rows(), mat.cols(), CvType.CV_8UC1)
+        Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
+
+        // Apply Gaussian Blur to reduce noise
+        val blurredMat = Mat()
+        Imgproc.GaussianBlur(grayMat, blurredMat, Size(15.0, 15.0), 0.0)
+
+        // Apply Canny Edge Detection
+        val edgesMat = Mat()
+        Imgproc.Canny(blurredMat, edgesMat, 0.0, 0.0)
+
+        // Convert Mat back to Bitmap
+        val edgeBitmap = Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(edgesMat, edgeBitmap)
+
+        return edgeBitmap
+    }
+
+    fun detectContoursAfterEdgeDetection(bitmap: Bitmap): Bitmap {
+        // Convert the bitmap to OpenCV Mat
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        // Convert to grayscale
+        val grayMat = Mat()
+        Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
+
+        // Apply GaussianBlur to reduce noise
+        val blurredMat = Mat()
+        Imgproc.GaussianBlur(grayMat, blurredMat, Size(5.0, 5.0), 0.0)
+
+        // Apply Canny edge detection
+        val edgesMat = Mat()
+        Imgproc.Canny(blurredMat, edgesMat, 50.0, 150.0)
+
+        // Find contours
+        val contours = ArrayList<MatOfPoint>()
+        val filterContours = mutableListOf<MatOfPoint>()
+        val hierarchy = Mat()
+        Imgproc.findContours(edgesMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+
+        contours.sortByDescending { Imgproc.contourArea(it) }
+        val largestContours = contours.take(10)
+
+        for (contour in largestContours) {
+            val perimeter = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
+            val approx = MatOfPoint2f()
+            Imgproc.approxPolyDP(MatOfPoint2f(*contour.toArray()), approx, 0.02 * perimeter, true)
+
+            // Step 4: If the contour has four points, assume it is the barcode
+            if (approx.rows() == 4) {
+                // Create a bounding box or polygon for the barcode
+               // return Mat(MatOfPoint(*approx.toArray()))
+                filterContours.add(contour)
+                Log.d("BARCODE", "Barcode found contour")
+            }
+        }
+
+        // Draw the contour (bounding box) on the image in green
+        val contourImage = Mat.zeros(edgesMat.size(), CvType.CV_8UC3)
+        val contourColor = Scalar(0.0, 255.0, 0.0) // Green color
+        Imgproc.drawContours(contourImage, filterContours, -1, contourColor, 2)
+
+        // Convert the Mat back to Bitmap to display
+        val resultBitmap = Bitmap.createBitmap(contourImage.cols(), contourImage.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(contourImage, resultBitmap)
+
+        // Draw contours
+        //val contourImage = Mat.zeros(edgesMat.size(), CvType.CV_8UC3)
+        //Imgproc.drawContours(contourImage, contours, -1, Scalar(0.0, 255.0, 0.0), 2)
+
+        // Convert Mat back to Bitmap to display
+        //val resultBitmap = Bitmap.createBitmap(contourImage.cols(), contourImage.rows(), Bitmap.Config.ARGB_8888)
+        //Utils.matToBitmap(contourImage, resultBitmap)
+
+        return resultBitmap
+    }
+
+
+    fun optimizedCannyForBarcode(bitmap: Bitmap): Bitmap {
+        // Convert Bitmap to Mat
+        val mat = Mat()
+        Utils.bitmapToMat(bitmap, mat)
+
+        // Convert to Grayscale
+        val grayMat = Mat()
+        Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
+
+        // Normalize brightness and contrast
+        val normalizedMat = Mat()
+        Core.normalize(grayMat, normalizedMat, 0.0, 255.0, Core.NORM_MINMAX)
+
+        // Apply Gaussian Blur to reduce noise
+        val blurredMat = Mat()
+        Imgproc.GaussianBlur(normalizedMat, blurredMat, Size(5.0, 5.0), 0.0)
+
+        // Apply Canny Edge Detection
+        val edgesMat = Mat()
+        Imgproc.Canny(blurredMat, edgesMat, 50.0, 150.0)
+
+        // Apply Morphological Transformations to enhance barcode edges
+        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+        Imgproc.dilate(edgesMat, edgesMat, kernel)
+
+        // Convert Mat back to Bitmap
+        val resultBitmap = Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(edgesMat, resultBitmap)
+
+        return resultBitmap
     }
 
     private fun takePhoto() {
@@ -181,14 +357,20 @@ class MainActivity : AppCompatActivity() {
             // Used to bind the lifecycle of cameras to the lifecycle owner
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
+
+
+            val targetResolution = android.util.Size(1080, 1920) //
             // Preview
             val preview = Preview.Builder()
+                .setTargetResolution(targetResolution)
                 .build()
                 .also {
                     it.setSurfaceProvider(viewBinding.viewFinder.surfaceProvider)
                 }
 
             imageCapture = ImageCapture.Builder()
+                .setTargetResolution(targetResolution)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build()
 
             val imageAnalyzer = ImageAnalysis.Builder()
@@ -282,14 +464,20 @@ class MainActivity : AppCompatActivity() {
 
         Log.d(TAG, "Proccess Image")
 
-        var image: InputImage? = null
+/*        var image: InputImage? = null
         try {
             image = InputImage.fromFilePath(this, uri)
         } catch (e: IOException) {
             e.printStackTrace()
-        }
+        }*/
 
-        //val image = InputImage.fromBitmap(bitmap, 0)
+
+        val imageBitmap = BitmapUtils.getBitmapFromContentUri(contentResolver, uri) ?: return
+
+        //val imageBitmapGrayScale = applyGaussianBlur(imageBitmap)
+        val imageBitmapGrayScale = applyGaussianBlur(imageBitmap)
+
+        val image = InputImage.fromBitmap(imageBitmapGrayScale, 0)
 
         if (image != null) {
             graphicOverlay?.clear()

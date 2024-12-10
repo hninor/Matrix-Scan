@@ -78,4 +78,6 @@ dependencies {
 
     implementation ("com.google.guava:guava:27.1-android")
 
+    implementation(project(":sdk"))
+
 }
