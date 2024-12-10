@@ -78,6 +78,8 @@ dependencies {
 
     implementation ("com.google.guava:guava:27.1-android")
 
+    implementation ("com.google.zxing:core:3.3.0")
+
     implementation(project(":sdk"))
 
 }

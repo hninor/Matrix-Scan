@@ -33,6 +33,11 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Core
@@ -40,10 +45,11 @@ import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
+import org.opencv.core.Point
 import org.opencv.core.Scalar
 import org.opencv.core.Size
+import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
-import java.io.IOException
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -168,6 +174,8 @@ class MainActivity : AppCompatActivity() {
         // Convert the original image to grayscale
         Imgproc.cvtColor(mat, grayMat, Imgproc.COLOR_BGR2GRAY)
 
+
+
         // Create another Mat to store the blurred image
         val blurredMat = Mat()
 
@@ -175,7 +183,8 @@ class MainActivity : AppCompatActivity() {
         Imgproc.GaussianBlur(grayMat, blurredMat, Size(3.0, 3.0), 1.5)
 
         // Convert the blurred Mat back to Bitmap
-        val blurredBitmap = Bitmap.createBitmap(blurredMat.cols(), blurredMat.rows(), Bitmap.Config.ARGB_8888)
+        val blurredBitmap =
+            Bitmap.createBitmap(blurredMat.cols(), blurredMat.rows(), Bitmap.Config.ARGB_8888)
         Utils.matToBitmap(blurredMat, blurredBitmap)
 
         return blurredBitmap
@@ -192,17 +201,69 @@ class MainActivity : AppCompatActivity() {
 
         // Apply Gaussian Blur to reduce noise
         val blurredMat = Mat()
-        Imgproc.GaussianBlur(grayMat, blurredMat, Size(15.0, 15.0), 0.0)
+        Imgproc.GaussianBlur(grayMat, blurredMat, Size(3.0, 3.0), 1.5)
 
         // Apply Canny Edge Detection
         val edgesMat = Mat()
-        Imgproc.Canny(blurredMat, edgesMat, 0.0, 0.0)
+        Imgproc.Canny(blurredMat, edgesMat, 120.0, 255.0)
 
         // Convert Mat back to Bitmap
-        val edgeBitmap = Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
+        val edgeBitmap =
+            Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
         Utils.matToBitmap(edgesMat, edgeBitmap)
 
         return edgeBitmap
+    }
+
+    fun detectBarcodeRectangle(bitmap: Bitmap): Mat {
+        // Convert Bitmap to Mat
+        val image = Mat()
+        Utils.bitmapToMat(bitmap, image)
+
+        // Step 1: Convert to grayscale
+        val gray = Mat()
+        Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY)
+
+        // Step 2: Apply adaptive thresholding to enhance barcode lines
+        val thresh = Mat()
+        Imgproc.adaptiveThreshold(gray, thresh, 255.0, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
+            Imgproc.THRESH_BINARY, 11, 2.0)
+
+        // Step 2: Apply Gaussian blur
+        val blurred = Mat()
+        Imgproc.GaussianBlur(thresh, blurred, Size(3.0, 3.0), 0.0)
+
+        // Step 3: Edge detection using Canny
+        val edges = Mat()
+        Imgproc.Canny(blurred, edges, 100.0, 200.0)
+
+        // Step 4: Find contours
+        val contours = mutableListOf<MatOfPoint>()
+        val hierarchy = Mat()
+        Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+
+        // Step 5: Filter contours and detect a rectangle (barcode)
+        for (contour in contours) {
+            //val perimeter = Imgproc.arcLength(contour, true)
+            val perimeter = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
+            val approx = MatOfPoint2f()
+            Imgproc.approxPolyDP(MatOfPoint2f(*contour.toArray()), approx, 0.02 * perimeter, true)
+            //val approx = MatOfPoint()
+            //Imgproc.approxPolyDP(contour, approx, 0.02 * perimeter, true)  // Approximate contour to polygon
+
+            // Step 6: Check if the contour has 4 vertices (a rectangle)
+            if (approx.rows() == 4) {
+                // Draw the bounding rectangle around the detected barcode
+                val boundingRect = Imgproc.boundingRect(approx)
+                Imgproc.rectangle(image, boundingRect.tl(), boundingRect.br(), Scalar(0.0, 255.0, 0.0), 2)
+            }
+        }
+
+        val edgeBitmap =
+            Bitmap.createBitmap(image.cols(), image.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(image, edgeBitmap)
+
+        return image  // Image with detected rectangle(s) drawn
     }
 
     fun detectContoursAfterEdgeDetection(bitmap: Bitmap): Bitmap {
@@ -226,7 +287,13 @@ class MainActivity : AppCompatActivity() {
         val contours = ArrayList<MatOfPoint>()
         val filterContours = mutableListOf<MatOfPoint>()
         val hierarchy = Mat()
-        Imgproc.findContours(edgesMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+        Imgproc.findContours(
+            edgesMat,
+            contours,
+            hierarchy,
+            Imgproc.RETR_EXTERNAL,
+            Imgproc.CHAIN_APPROX_SIMPLE
+        )
 
         contours.sortByDescending { Imgproc.contourArea(it) }
         val largestContours = contours.take(10)
@@ -239,7 +306,7 @@ class MainActivity : AppCompatActivity() {
             // Step 4: If the contour has four points, assume it is the barcode
             if (approx.rows() == 4) {
                 // Create a bounding box or polygon for the barcode
-               // return Mat(MatOfPoint(*approx.toArray()))
+                // return Mat(MatOfPoint(*approx.toArray()))
                 filterContours.add(contour)
                 Log.d("BARCODE", "Barcode found contour")
             }
@@ -251,7 +318,8 @@ class MainActivity : AppCompatActivity() {
         Imgproc.drawContours(contourImage, filterContours, -1, contourColor, 2)
 
         // Convert the Mat back to Bitmap to display
-        val resultBitmap = Bitmap.createBitmap(contourImage.cols(), contourImage.rows(), Bitmap.Config.ARGB_8888)
+        val resultBitmap =
+            Bitmap.createBitmap(contourImage.cols(), contourImage.rows(), Bitmap.Config.ARGB_8888)
         Utils.matToBitmap(contourImage, resultBitmap)
 
         // Draw contours
@@ -292,7 +360,8 @@ class MainActivity : AppCompatActivity() {
         Imgproc.dilate(edgesMat, edgesMat, kernel)
 
         // Convert Mat back to Bitmap
-        val resultBitmap = Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
+        val resultBitmap =
+            Bitmap.createBitmap(edgesMat.cols(), edgesMat.rows(), Bitmap.Config.ARGB_8888)
         Utils.matToBitmap(edgesMat, resultBitmap)
 
         return resultBitmap
@@ -341,6 +410,7 @@ class MainActivity : AppCompatActivity() {
                     Log.d(TAG, msg)
 
                     output.savedUri?.let { proccessImage(it) }
+
                 }
             }
         )
@@ -356,7 +426,6 @@ class MainActivity : AppCompatActivity() {
         cameraProviderFuture.addListener({
             // Used to bind the lifecycle of cameras to the lifecycle owner
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-
 
 
             val targetResolution = android.util.Size(1080, 1920) //
@@ -464,18 +533,19 @@ class MainActivity : AppCompatActivity() {
 
         Log.d(TAG, "Proccess Image")
 
-/*        var image: InputImage? = null
-        try {
-            image = InputImage.fromFilePath(this, uri)
-        } catch (e: IOException) {
-            e.printStackTrace()
-        }*/
+        /*        var image: InputImage? = null
+                try {
+                    image = InputImage.fromFilePath(this, uri)
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                }*/
 
 
         val imageBitmap = BitmapUtils.getBitmapFromContentUri(contentResolver, uri) ?: return
 
         //val imageBitmapGrayScale = applyGaussianBlur(imageBitmap)
         val imageBitmapGrayScale = applyGaussianBlur(imageBitmap)
+        //detectBarcodeRectangle(imageBitmap)
 
         val image = InputImage.fromBitmap(imageBitmapGrayScale, 0)
 
@@ -488,7 +558,7 @@ class MainActivity : AppCompatActivity() {
                 .addOnSuccessListener { barcodes ->
                     // Task completed successfully
                     // ...
-
+                    Log.d(TAG, "Codigos detectados ${barcodes.size}")
                     if (barcodes.isNotEmpty()) {
 
                         Toast.makeText(
@@ -612,4 +682,6 @@ class MainActivity : AppCompatActivity() {
 
         }
     }
+
+
 }
